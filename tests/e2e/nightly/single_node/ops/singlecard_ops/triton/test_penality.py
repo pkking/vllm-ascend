@@ -3,6 +3,8 @@ import gc
 import pytest
 import torch
 
+from vllm_ascend.device.device_config import get_ascend_device_type
+from vllm_ascend.device.hardware import AscendDeviceType
 from vllm_ascend.worker.v2.sample.penalties import apply_penalties
 
 NUM_TOKENS = [1, 4]
@@ -180,6 +182,10 @@ def create_test_data(
 
 
 class TestApplyPenalties:
+    # make sure the kernel produces the same result as the pytorch implementation
+    @pytest.mark.skipif(
+        get_ascend_device_type() not in (AscendDeviceType.A2, AscendDeviceType.A3), reason="Requires Ascend A2/A3"
+    )
     @pytest.mark.parametrize("num_tokens", NUM_TOKENS)
     @pytest.mark.parametrize("vocab_size", VOCAB_SIZE)
     @pytest.mark.parametrize("num_status", NUM_STATUS)
@@ -241,6 +247,86 @@ class TestApplyPenalties:
             atol = 1e-02
             rtol = 1e-02
         assert torch.allclose(logits_triton, logits_pytorch_result, atol=atol, rtol=rtol)
+        gc.collect()
+        torch.npu.empty_cache()
+        torch.npu.reset_peak_memory_stats()
+
+    # make sure the kernel can handle large shapes without crashing
+    @pytest.mark.skipif(
+        get_ascend_device_type() not in (AscendDeviceType.A2, AscendDeviceType.A3), reason="Requires Ascend A2/A3"
+    )
+    @pytest.mark.parametrize(
+        "num_tokens,vocab_size,num_status,num_speculative_tokens,dtype",
+        [
+            pytest.param(
+                2048,
+                155648,
+                4,
+                3,
+                torch.bfloat16,
+                id="target_2048x155648",
+            ),
+        ],
+    )
+    @pytest.mark.parametrize("seed", SEEDS)
+    @pytest.mark.parametrize("device", DEVICES)
+    @torch.inference_mode()
+    def test_apply_penalties_capable_with_large_shape(
+        self,
+        num_tokens,
+        vocab_size,
+        num_status,
+        num_speculative_tokens,
+        dtype,
+        seed,
+        device,
+    ):
+        (
+            logits_triton,
+            idx_mapping,
+            token_ids,
+            expanded_local_pos,
+            repetition_penalty,
+            frequency_penalty,
+            presence_penalty,
+            prompt_bin_mask,
+            output_bin_counts,
+        ) = create_test_data(
+            num_tokens=num_tokens,
+            vocab_size=vocab_size,
+            num_status=num_status,
+            num_speculative_tokens=num_speculative_tokens,
+            device=device,
+            dtype=dtype,
+            seed=seed,
+        )
+
+        apply_penalties(
+            logits_triton,
+            idx_mapping,
+            token_ids,
+            expanded_local_pos,
+            repetition_penalty,
+            frequency_penalty,
+            presence_penalty,
+            prompt_bin_mask,
+            output_bin_counts,
+        )
+
+        # Make asynchronous kernel launch errors fail this test directly.
+        torch.npu.synchronize()
+
+        del (
+            logits_triton,
+            idx_mapping,
+            token_ids,
+            expanded_local_pos,
+            repetition_penalty,
+            frequency_penalty,
+            presence_penalty,
+            prompt_bin_mask,
+            output_bin_counts,
+        )
         gc.collect()
         torch.npu.empty_cache()
         torch.npu.reset_peak_memory_stats()

@@ -8,20 +8,24 @@ from vllm.v1.metrics.reader import Counter, Vector
 
 from tests.e2e.conftest import VllmRunner
 from tests.e2e.pull_request.one_card.spec_decode.utils import BASELINES, DSPARK, calculate_acceptance_per_pos
-from vllm_ascend.utils import vllm_version_is
-
-pytestmark = pytest.mark.skipif(
-    vllm_version_is("0.24.0"),
-    reason="The community has not yet incorporated the DSpark feature in vLLM v0.24.0",
-)
 
 
+@pytest.mark.skip(reason="Model Runner V1 is outside the default CI path")
 @pytest.mark.parametrize("method", DSPARK.keys())
 @pytest.mark.parametrize("num_speculative_tokens", [7])
-def test_dspark_acceptance(
+def test_dspark_kv_sliding_window(
     method: str,
     num_speculative_tokens: int,
 ):
+    """DSpark draft attention with a KV sliding window.
+
+    Greedy acceptance per position against a golden baseline, with
+    draft_window_size=512 and a prompt longer than the window, so the draft
+    attention runs on the windowed block table. The window only changes what
+    the draft reads, never the target model's verification, so acceptance
+    stays in the same range as the no-window baseline (slightly lower, since the
+    draft sees less context).
+    """
     main_model_name = DSPARK[method]["main"]
     spec_model_name = DSPARK[method]["spec"]
 
@@ -35,7 +39,10 @@ def test_dspark_acceptance(
         max_tokens=256,
     )
 
-    prompts = [{"role": "user", "content": "Hello, your name is"}]
+    # Prompt longer than the 512-token window, so the draft attention reads
+    # the cropped block table from the first step on.
+    filler = " ".join(f"context paragraph {i} about speculative decoding." for i in range(220))
+    prompts = [{"role": "user", "content": f"{filler} Hello, your name is"}]
     prompts = [
         tokenizer.apply_chat_template(
             [prompt],
@@ -65,6 +72,7 @@ def test_dspark_acceptance(
         speculative_config=speculative_config,
         compilation_config=compilation_config,
         enable_prefix_caching=False,
+        additional_config={"draft_window_size": 512},
     ) as llm:
         outputs = llm.model.generate(prompts, sampling_params)
         metrics = llm.model.get_metrics()
@@ -77,11 +85,7 @@ def test_dspark_acceptance(
         print(f"Output tokens: {output_tokens}")
 
     acceptance_per_pos = calculate_acceptance_per_pos(metrics, num_speculative_tokens, Counter, Vector)
-    golden = BASELINES[method]
+    golden = BASELINES[f"{method}_sliding_window"]
 
     match = all(abs(a - b) < 0.1 for a, b in zip(acceptance_per_pos, golden))
-    if not match:
-        print(f"acceptance_per_pos: {acceptance_per_pos}")
-        print(f"golden: {golden}")
-
-    assert match
+    assert match, f"acceptance_per_pos {acceptance_per_pos} does not match golden {golden}"

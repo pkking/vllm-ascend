@@ -12,7 +12,7 @@ import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-PATCH_MAMBA_UTILS = ROOT / "vllm_ascend" / "patch" / "worker" / "patch_mamba_utils.py"
+PATCH_MAMBA_UTILS = ROOT / "vllm_ascend" / "patch" / "worker" / "patch_v1" / "patch_mamba_utils.py"
 
 
 def _func(path: Path, name: str) -> ast.FunctionDef:
@@ -31,6 +31,8 @@ def test_310p_postprocess_fallback_preserves_upstream_metadata_semantics() -> No
 
     assert "num_accepted_tokens_gpu" in src
     assert "num_accepted_tokens_cpu_tensor[:num_reqs].copy_(num_accepted_tokens_gpu[:num_reqs])" in src
+    assert "num_accepted_tokens = num_accepted_tokens_cpu_tensor" in src
+    assert "num_accepted_tokens = input_batch.num_accepted_tokens_cpu" not in src
     assert "num_tokens_running_state = num_computed_tokens[i] + num_scheduled_tokens[i] - num_draft_tokens[i]" in src
     assert "new_num_computed_tokens = num_tokens_running_state + num_accepted_tokens[i] - 1" in src
     assert "aligned_new_computed_tokens = new_num_computed_tokens // block_size * block_size" in src

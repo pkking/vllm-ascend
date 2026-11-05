@@ -22,17 +22,10 @@ import pytest
 from vllm import SamplingParams
 
 from tests.e2e.conftest import VllmRunner
-from vllm_ascend.utils import vllm_version_is
 
 MODELS = ["Qwen/Qwen3-0.6B"]
 
-pytestmark = pytest.mark.skipif(
-    vllm_version_is("0.24.0"),
-    reason="v2 model runner patches are only supported on the verified vLLM main commit",
-)
 
-
-@pytest.mark.skipif(True, reason="Fix me, it's broken after CANN and trition-ascend are upgraded.")
 @pytest.mark.parametrize("model", MODELS)
 @pytest.mark.parametrize("max_tokens", [32])
 @pytest.mark.parametrize("enforce_eager", [True])

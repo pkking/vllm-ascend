@@ -28,51 +28,51 @@ such as IP addresses according to your actual environment.
 
 1. Single Node Verification:
 
-   Execute the following commands sequentially. The results must all be
-   `success` and the status must be `UP`:
+    Execute the following commands sequentially. The results must all be
+    `success` and the status must be `UP`:
 
-   ```bash
-   # Check the remote switch ports
-   for i in {0..7}; do hccn_tool -i $i -lldp -g | grep Ifname; done
-   # Get the link status of the Ethernet ports (UP or DOWN)
-   for i in {0..7}; do hccn_tool -i $i -link -g ; done
-   # Check the network health status
-   for i in {0..7}; do hccn_tool -i $i -net_health -g ; done
-   # View the network detected IP configuration
-   for i in {0..7}; do hccn_tool -i $i -netdetect -g ; done
-   # View gateway configuration
-   for i in {0..7}; do hccn_tool -i $i -gateway -g ; done
-   ```
+    ```bash
+    # Check the remote switch ports
+    for i in {0..7}; do hccn_tool -i $i -lldp -g | grep Ifname; done
+    # Get the link status of the Ethernet ports (UP or DOWN)
+    for i in {0..7}; do hccn_tool -i $i -link -g ; done
+    # Check the network health status
+    for i in {0..7}; do hccn_tool -i $i -net_health -g ; done
+    # View the network detected IP configuration
+    for i in {0..7}; do hccn_tool -i $i -netdetect -g ; done
+    # View gateway configuration
+    for i in {0..7}; do hccn_tool -i $i -gateway -g ; done
+    ```
 
 2. Check NPU HCCN Configuration:
 
-   Ensure that the hccn.conf file exists in the environment. If using Docker,
-   mount it into the container.
+    Ensure that the hccn.conf file exists in the environment. If using Docker,
+    mount it into the container.
 
-   ```bash
-   cat /etc/hccn.conf
-   ```
+    ```bash
+    cat /etc/hccn.conf
+    ```
 
 3. Get NPU IP Addresses:
 
-   ```bash
-   for i in {0..7}; do hccn_tool -i $i -ip -g; done
-   ```
+    ```bash
+    for i in {0..7}; do hccn_tool -i $i -ip -g; done
+    ```
 
 4. Cross-Node PING Test:
 
-   ```bash
-   # Execute the following command on each node, replacing x.x.x.x
-   # with the target node's NPU card address.
-   for i in {0..7}; do hccn_tool -i $i -ping -g address x.x.x.x; done
-   ```
+    ```bash
+    # Execute the following command on each node, replacing x.x.x.x
+    # with the target node's NPU card address.
+    for i in {0..7}; do hccn_tool -i $i -ping -g x.x.x.x; done
+    ```
 
 5. Check NPU TLS Configuration
 
-   ```bash
-   # The tls settings should be consistent across all nodes.
-   for i in {0..7}; do hccn_tool -i $i -tls -g ; done | grep switch
-   ```
+    ```bash
+    # The tls settings should be consistent across all nodes.
+    for i in {0..7}; do hccn_tool -i $i -tls -g ; done | grep switch
+    ```
 
 ## Run with Docker
 
@@ -115,8 +115,7 @@ Mooncake is pre-installed and functional in the {{vllm_ascend_version}} image.
 The following installation steps are optional.
 
 Mooncake is the serving platform for Kimi, a leading LLM service provided by
-Moonshot AI. Installation and compilation guide:
-<https://github.com/kvcache-ai/Mooncake?tab=readme-ov-file#build-and-use-binaries>.
+Moonshot AI. Installation and compilation guide:[Installation and compilation guide](https://github.com/kvcache-ai/Mooncake?tab=readme-ov-file#build-and-use-binaries).
 
 First, obtain the Mooncake project using the following command:
 
@@ -195,7 +194,7 @@ The template for the mooncake.json file is as follows:
 | metadata_server | P2PHANDSHAKE              | Point-to-point handshake mode  |
 | protocol              | ascend              | Ascend proprietary protocol    |
 | master_server_address | 90.90.100.188:50088(for example) | Master server address|
-| global_segment_size   | 107374182400    | Size per segment (100 GB)      |
+| global_segment_size   | 107374182400    | Size per segment (100GB)      |
 
 ## vLLM Instance Deployment
 
@@ -214,9 +213,8 @@ configuration.
 export LD_LIBRARY_PATH=/usr/local/Ascend/ascend-toolkit/\
 latest/python/site-packages:$LD_LIBRARY_PATH
 export MOONCAKE_CONFIG_PATH="/vllm-workspace/mooncake.json"
-# NPU buffer pool: quantity:size(MB)
-# Allocates 4 buffers of 8MB each for KV transfer
-export ASCEND_BUFFER_POOL=4:8
+# Enable RoCE path for A2 series
+export HCCL_INTRA_ROCE_ENABLE=1
 
 vllm serve <path_to_your_model>/Qwen2.5-72B-Instruct/ \
 --served-model-name qwen \

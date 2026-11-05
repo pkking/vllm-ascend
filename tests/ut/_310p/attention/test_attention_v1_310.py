@@ -34,6 +34,7 @@ class TestAscendAttentionBackend310(TestBase):
         self.mock_config = MagicMock()
         self.utils_patcher = patch("vllm_ascend.attention.utils.get_current_vllm_config", return_value=self.mock_config)
         self.utils_patcher.start()
+        self.addCleanup(self.utils_patcher.stop)
 
     def test_get_impl_cls(self):
         self.assertEqual(AscendAttentionBackend310.get_impl_cls(), AscendAttentionBackendImpl310)
@@ -54,6 +55,14 @@ class TestAscendAttentionBackendImpl310(TestBase):
         self.attn_metadata = MagicMock()
         self.attn_metadata.return_value = "1"
         self.mock_vllm_config = MagicMock()
+        self.mock_vllm_config.parallel_config.prefill_context_parallel_size = 1
+        self.mock_vllm_config.parallel_config.decode_context_parallel_size = 1
+        self.mock_vllm_config.cache_config.cache_dtype = "float16"
+        self.utils_patcher = patch(
+            "vllm_ascend.attention.utils.get_current_vllm_config", return_value=self.mock_vllm_config
+        )
+        self.utils_patcher.start()
+        self.addCleanup(self.utils_patcher.stop)
         self.layer_no_quant = MagicMock(spec=["layer_name", "_k_scale_float", "_v_scale_float"])
         self.layer_no_quant.layer_name = "test_layer"
         self.layer_no_quant._k_scale_float = 1.0
@@ -62,6 +71,7 @@ class TestAscendAttentionBackendImpl310(TestBase):
             "vllm_ascend.attention.attention_v1.get_current_vllm_config", return_value=self.mock_vllm_config
         )
         self.config_patcher.start()
+        self.addCleanup(self.config_patcher.stop)
         self.impl = AscendAttentionBackendImpl310(
             num_heads=8,
             head_size=128,
@@ -187,11 +197,12 @@ class TestAscendAttentionBackendImpl310(TestBase):
 
         mock_npu_paged_attention_splitfuse.assert_called_once()
 
+    @patch("vllm_ascend.attention.attention_v1.using_paged_attention")
     @patch("torch_npu._npu_paged_attention", create=True)
     @patch("torch_npu._npu_reshape_and_cache")
     @patch("vllm_ascend.ascend_forward_context.get_forward_context")
     def test_forward_paged_attention_310(
-        self, mock_get_forward_context, mock_npu_reshape_and_cache, mock_paged_attention
+        self, mock_get_forward_context, mock_npu_reshape_and_cache, mock_paged_attention, mock_using_paged_attention
     ):
         """Test forward pass in DecodeOnly state"""
         query = torch.randn(4, 8 * 64)
@@ -206,6 +217,8 @@ class TestAscendAttentionBackendImpl310(TestBase):
         metadata.slot_mapping = torch.zeros(4, dtype=torch.long)
         metadata.num_decodes = 4
         metadata.num_prefills = 0
+        mock_using_paged_attention.return_value = True
+
         mock_get_forward_context.return_value = MagicMock(capturing=False)
 
         output = self.impl.forward_impl(query, key, value, None, metadata, output)

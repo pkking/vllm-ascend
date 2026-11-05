@@ -93,7 +93,9 @@ def create_mock_vllm_config(
     mock_config.quant_config = Mock(quant_description=quant_description)
     mock_config.model_config = Mock(
         dtype=model_dtype,
+        architectures=[],
         hf_config=Mock(model_type=None),
+        hf_text_config=Mock(model_type=None),
         enforce_eager=enforce_eager,
     )
 
@@ -123,11 +125,9 @@ def create_mock_vllm_config(
 
 def create_mock_ascend_config(
     dynamic_eplb=False,
-    flashcomm2_oproj_tensor_parallel_size=1,
 ):
     mock_config = Mock()
     mock_config.eplb_config = Mock(dynamic_eplb=dynamic_eplb)
-    mock_config.flashcomm2_oproj_tensor_parallel_size = flashcomm2_oproj_tensor_parallel_size
     return mock_config
 
 

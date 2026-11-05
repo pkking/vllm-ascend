@@ -17,70 +17,81 @@
 
 from vllm.triton_utils import HAS_TRITON
 
-from vllm_ascend.utils import is_310p, vllm_version_is
+from vllm_ascend.device.hardware_profile import HardwareCapability, get_current_hardware_profile
 
-# The v2 model runner tracks only the verified vLLM main commit. The v0.24.0
-# release has diverged APIs and is intentionally kept on the v1 runner instead
-# of maintaining a separate v2 compatibility path.
-_V2_MODEL_RUNNER_SUPPORTED = not vllm_version_is("0.24.0")
-
+# patch_ascend_ops rebinds causal_conv1d to the AscendC wrappers and
+# patch_triton overwrites causal_conv1d_update with the NPU Triton kernel, so
+# the AscendC patch must be imported first.
 if HAS_TRITON:
-    import vllm_ascend.patch.worker.patch_triton
-
-    if _V2_MODEL_RUNNER_SUPPORTED:
-        import vllm_ascend.patch.worker.patch_v2.patch_triton  # noqa
+    import vllm_ascend.patch.worker.patch_ascend_ops  # noqa
+    import vllm_ascend.patch.worker.patch_triton  # noqa
 
 
-import vllm_ascend.patch.worker.patch_process_weights_after_loading  # noqa
-import vllm_ascend.patch.worker.patch_weight_utils  # noqa
+# Flip STR_DTYPE_TO_TORCH_DTYPE["fp8"] -> torch.float8_e4m3fn on vllm builds
+# that lack register_kv_cache_dtype (e.g. releases/v0.27.1). Must run in every
+# worker before model loading resolves kv_cache_dtype. No-op on kvquant_27.
+import vllm_ascend.patch.worker.patch_kv_cache_dtype  # noqa
+
+# Apply before model construction on every device, including 310P.
+import vllm_ascend.patch.worker.patch_mm_input_norm  # noqa
+
 import vllm_ascend.patch.worker.patch_distributed  # noqa
 import vllm_ascend.patch.worker.patch_minimax_m2  # noqa
-import vllm_ascend.patch.worker.patch_minimax_m2_linear_attn  # noqa
 import vllm_ascend.patch.worker.patch_mamba_utils  # noqa
-import vllm_ascend.patch.worker.patch_qwen3_next_mtp  # noqa
+import vllm_ascend.patch.worker.patch_bind_kv_cache  # noqa
 import vllm_ascend.patch.worker.patch_step3p5  # noqa
 
-if not is_310p():
+# MRv1-only patches. Every module imported below targets a symbol that is only
+# reachable through the V1 Model Runner, so deleting the `patch_v1` package
+# removes all V1 patch support in one step.
+import vllm_ascend.patch.worker.patch_v1  # noqa
+
+if get_current_hardware_profile().supports(HardwareCapability.STANDARD_WORKER_PATCHES):
     import vllm_ascend.patch.worker.patch_qwen3_5  # noqa
     import vllm_ascend.patch.worker.patch_qwen3_dflash  # noqa
-    import vllm_ascend.patch.worker.patch_qwen3_dspark  # noqa
     import vllm_ascend.patch.worker.patch_qwen3vl  # noqa
 else:
     import vllm_ascend.patch.worker.patch_idex_310  # noqa
-import vllm_ascend.patch.worker.patch_rejection_sampler  # noqa
+    import vllm_ascend.patch.worker.patch_spec_decode_310  # noqa
+# NOTE: the former patch_rejection_sampler.py has been removed.
+# vllm_ascend/sample/rejection_sampler.py subclasses RejectionSampler and
+# defines its own forward, so the upstream vllm.v1.sample.rejection_sampler
+# helpers never run on Ascend and there is nothing left to rebind. That module
+# is MRv1-only, so MRv2 processes never import vllm_ascend.sample.
 
-# torchair/npugraph_ex is only available on NPU; silently skip when missing
-# so that CPU-only environments (e.g. UT runners without torch_npu) can still
-# import this module without crashing.
-try:  # noqa: SIM105
-    import vllm_ascend.patch.worker.patch_npugraph_ex_triton  # noqa
-except ImportError:
-    pass
 import vllm_ascend.patch.worker.patch_kimi_k25  # noqa
-import vllm_ascend.patch.worker.patch_draft_quarot  # noqa
 import vllm_ascend.patch.worker.patch_eagle3_init  # noqa
-import vllm_ascend.patch.worker.patch_cudagraph  # noqa
-import vllm_ascend.patch.worker.patch_deepseek_mtp  # noqa
 import vllm_ascend.patch.worker.patch_deepseek_v2  # noqa
-import vllm_ascend.patch.worker.patch_gqa_c8  # noqa
 
-# vLLM's use_v2_model_runner may enable the v2 runner without the
-# VLLM_USE_V2_MODEL_RUNNER env var (e.g. based on model architecture).
-# We always patch it so that on Ascend the v2 runner is enabled only
-# when the env var is explicitly set.
-import vllm_ascend.patch.worker.patch_v2.patch_use_v2_model_runner  # noqa
+# Re-apply the default-V2 runner selection (with the V2 feature blacklist)
+# and related V2/V1 feature patches in worker processes.
+# VLLM_USE_V2_MODEL_RUNNER=0 explicitly selects V1.
+import vllm_ascend.patch.worker.patch_use_v2_model_runner  # noqa
 
 import vllm_ascend.patch.worker.patch_fused_moe  # noqa
 
-if _V2_MODEL_RUNNER_SUPPORTED:
-    import vllm_ascend.patch.worker.patch_v2.patch_uva  # noqa
-    import vllm_ascend.patch.worker.patch_v2.patch_input_batch  # noqa
-    import vllm_ascend.patch.worker.patch_v2.patch_model_state  # noqa
-    import vllm_ascend.patch.worker.patch_v2.patch_block_table  # noqa
-    import vllm_ascend.patch.worker.patch_v2.patch_attn_utils  # noqa
-    import vllm_ascend.patch.worker.patch_v2.patch_eagle_speculator  # noqa
-    import vllm_ascend.patch.worker.patch_v2.patch_dflash_speculator  # noqa
+import vllm_ascend.patch.worker.patch_uva  # noqa
+import vllm_ascend.patch.worker.patch_input_batch  # noqa
+import vllm_ascend.patch.worker.patch_model_state  # noqa
+import vllm_ascend.patch.worker.patch_block_table  # noqa
+import vllm_ascend.patch.worker.patch_attn_utils  # noqa
+import vllm_ascend.patch.worker.patch_model_runner  # noqa
+
+import vllm_ascend.patch.worker.patch_eagle_speculator  # noqa
+import vllm_ascend.patch.worker.patch_dflash_speculator  # noqa
+import vllm_ascend.patch.worker.patch_dspark  # noqa
+import vllm_ascend.patch.worker.patch_adaptive_verification  # noqa
+
+# 310P: draft FULL must use AutoRegressiveAclGraphManager310 (no FIA graph_task).
+# patch_eagle_speculator above installs the 910 manager; re-override here.
+if not get_current_hardware_profile().supports(HardwareCapability.STANDARD_WORKER_PATCHES):
+    from vllm.v1.worker.gpu.spec_decode.target_dependent_ar import speculator as _ar_spec
+
+    from vllm_ascend._310p.worker.v2.spec_decode.aclgraph import (
+        AutoRegressiveAclGraphManager310,
+    )
+
+    _ar_spec.SpeculatorCudaGraphManager = AutoRegressiveAclGraphManager310
 
 # only patch routed experts capture in main2main.
-if _V2_MODEL_RUNNER_SUPPORTED:
-    import vllm_ascend.patch.worker.patch_routed_experts_capture  # noqa
+import vllm_ascend.patch.worker.patch_routed_experts_capture  # noqa
